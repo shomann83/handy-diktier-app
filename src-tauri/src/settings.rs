@@ -1,4 +1,3 @@
-use crate::utils;
 use log::{debug, warn};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -594,7 +593,8 @@ fn default_autostart_enabled() -> bool {
 }
 
 fn default_update_checks_enabled() -> bool {
-    true
+    // handy-diktier-app fork: updates come from our own builds, never upstream.
+    false
 }
 
 fn default_show_whats_new_on_update() -> bool {
@@ -1372,13 +1372,10 @@ fn os_languages() -> &'static [String] {
     }
 }
 
-/// Update checks are forced off (without touching the persisted setting) when
-/// `HANDY_DISABLE_UPDATER` is set — e.g. by the Nix package, since self-update
-/// can't work against an immutable /nix/store install.
+/// Update checks are always forced off in the handy-diktier-app fork: the
+/// upstream updater would replace the fork with stock Handy.
 pub fn update_checks_forced_disabled() -> bool {
-    use std::sync::OnceLock;
-    static IS_UPDATER_DISABLED: OnceLock<bool> = OnceLock::new();
-    *IS_UPDATER_DISABLED.get_or_init(|| utils::env_flag_enabled("HANDY_DISABLE_UPDATER"))
+    true
 }
 
 /// Effective updater state: the user's stored preference, overridden to `false`
@@ -1424,6 +1421,13 @@ pub fn get_recording_retention_period(app: &AppHandle) -> RecordingRetentionPeri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fork_never_checks_for_updates() {
+        // The fork must never self-update to upstream Handy.
+        assert!(update_checks_forced_disabled());
+        assert!(!default_update_checks_enabled());
+    }
 
     #[test]
     fn stored_binding_returns_the_requested_binding() {
