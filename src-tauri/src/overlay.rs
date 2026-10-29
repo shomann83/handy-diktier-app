@@ -824,7 +824,8 @@ mod tests {
                 OVERLAY_HEIGHT,
                 OverlayPosition::Bottom,
             ),
-            (3648, 2025, 384, 75)
+            // 320x86 logical at 1.5x = 480x129, centered, 40px bottom offset
+            (3600, 1971, 480, 129)
         );
         assert_eq!(
             windows_overlay_bounds(
@@ -836,7 +837,7 @@ mod tests {
                 OVERLAY_HEIGHT,
                 OverlayPosition::Top,
             ),
-            (3648, 6, 384, 75)
+            (3600, 6, 480, 129)
         );
     }
 
