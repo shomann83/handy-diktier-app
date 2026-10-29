@@ -43,11 +43,11 @@ tauri_panel! {
 // On Windows these sizes are additionally multiplied by the accessibility text
 // scale (see windows_text_scale_factor), which WebView2 applies as a zoom.
 //
-// Compact overlay (Minimal / transcribing / processing): the 40h pill animates
-// width from 172 (--ov-rest-w) to 216 (--ov-work-w) and expands from center, so
-// the window must fit the widest state plus a little slack.
-const OVERLAY_WIDTH: f64 = 256.0;
-const OVERLAY_HEIGHT: f64 = 50.0;
+// Compact overlay (Minimal / transcribing / processing): the 300w x 42h pill
+// (--ov-rest-w / --ov-work-w) plus the style bar above it (~22h + 6 gap + the
+// active chip's 2px lift), with a little slack.
+const OVERLAY_WIDTH: f64 = 320.0;
+const OVERLAY_HEIGHT: f64 = 86.0;
 
 // Actual is 394x118, just a little extra
 const OVERLAY_STREAM_WIDTH: f64 = 400.0;
@@ -824,7 +824,8 @@ mod tests {
                 OVERLAY_HEIGHT,
                 OverlayPosition::Bottom,
             ),
-            (3648, 2025, 384, 75)
+            // 320x86 logical at 1.5x = 480x129, centered, 40px bottom offset
+            (3600, 1971, 480, 129)
         );
         assert_eq!(
             windows_overlay_bounds(
@@ -836,7 +837,7 @@ mod tests {
                 OVERLAY_HEIGHT,
                 OverlayPosition::Top,
             ),
-            (3648, 6, 384, 75)
+            (3600, 6, 480, 129)
         );
     }
 

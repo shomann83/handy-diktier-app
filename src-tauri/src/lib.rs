@@ -9,6 +9,7 @@ mod chinese_script;
 pub mod cli;
 mod clipboard;
 mod commands;
+mod digit_capture;
 pub mod engine_supervisor;
 mod helpers;
 mod input;
@@ -23,6 +24,7 @@ mod secure_input;
 mod settings;
 mod shortcut;
 mod signal_handle;
+mod style_bar;
 mod system_languages;
 mod transcription_coordinator;
 mod tray;
@@ -793,6 +795,7 @@ pub fn run(cli_args: CliArgs) {
             managers::transcription::StreamPhaseEvent,
             transcription_coordinator::RecordingStateEvent,
             actions::TranscriptionCompleteEvent,
+            style_bar::StyleBarEvent,
         ]);
 
     #[cfg(debug_assertions)] // <- Only export on non-release builds
@@ -966,7 +969,7 @@ pub fn run(cli_args: CliArgs) {
             // for portable mode (redirects WebView2 cache to portable Data dir)
             let mut win_builder =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
-                    .title("Handy")
+                    .title("TypeTalk")
                     .inner_size(utils::MAIN_WINDOW_SIZE.0, utils::MAIN_WINDOW_SIZE.1)
                     .min_inner_size(utils::MAIN_WINDOW_SIZE.0, utils::MAIN_WINDOW_SIZE.1)
                     .resizable(true)

@@ -93,6 +93,9 @@ struct RecordingErrorEvent {
 struct FinishGuard(AppHandle, Arc<TranscriptionManager>);
 impl Drop for FinishGuard {
     fn drop(&mut self) {
+        // Before notify_processing_finished: the next dictation may start
+        // right after it and must not find this session still open.
+        crate::style_bar::end(&self.0);
         self.1.maybe_unload_immediately("transcription session");
         if let Some(c) = self.0.try_state::<TranscriptionCoordinator>() {
             c.notify_processing_finished();
@@ -113,6 +116,9 @@ pub trait ShortcutAction: Send + Sync {
 // Transcribe Action
 struct TranscribeAction {
     post_process: bool,
+    /// Show the style bar and let the user pick the post-processing style
+    /// per dictation (overrides `post_process`).
+    style_bar: bool,
 }
 
 /// Field name for structured output JSON schema
@@ -171,11 +177,25 @@ where
     }
 }
 
-fn should_use_streaming_overlay(style: OverlayStyle, is_streaming: bool) -> bool {
-    style == OverlayStyle::Live && is_streaming
+fn should_use_streaming_overlay(style: OverlayStyle, is_streaming: bool, style_bar: bool) -> bool {
+    // The style bar sits above the compact pill, so it always uses that form.
+    style == OverlayStyle::Live && is_streaming && !style_bar
 }
 
-async fn post_process_transcription(settings: &AppSettings, transcription: &str) -> Option<String> {
+/// Template text of the post-processing prompt with this id.
+fn prompt_text_for(settings: &AppSettings, prompt_id: &str) -> Option<String> {
+    settings
+        .post_process_prompts
+        .iter()
+        .find(|prompt| prompt.id == prompt_id)
+        .map(|prompt| prompt.prompt.clone())
+}
+
+async fn post_process_transcription(
+    settings: &AppSettings,
+    transcription: &str,
+    prompt_id: &str,
+) -> Option<String> {
     if is_blank_transcription(transcription) {
         debug!("Post-processing skipped because the transcription is empty");
         return None;
@@ -203,27 +223,12 @@ async fn post_process_transcription(settings: &AppSettings, transcription: &str)
         return None;
     }
 
-    let selected_prompt_id = match &settings.post_process_selected_prompt_id {
-        Some(id) => id.clone(),
-        None => {
-            debug!("Post-processing skipped because no prompt is selected");
-            return None;
-        }
-    };
-
-    let prompt = match settings
-        .post_process_prompts
-        .iter()
-        .find(|prompt| prompt.id == selected_prompt_id)
-    {
-        Some(prompt) => prompt.prompt.clone(),
-        None => {
-            debug!(
-                "Post-processing skipped because prompt '{}' was not found",
-                selected_prompt_id
-            );
-            return None;
-        }
+    let Some(prompt) = prompt_text_for(settings, prompt_id) else {
+        debug!(
+            "Post-processing skipped because prompt '{}' was not found",
+            prompt_id
+        );
+        return None;
     };
 
     if prompt.trim().is_empty() {
@@ -410,27 +415,20 @@ pub(crate) struct ProcessedTranscription {
 pub(crate) async fn process_transcription_output(
     app: &AppHandle,
     transcription: &str,
-    post_process: bool,
+    prompt_id: Option<&str>,
 ) -> ProcessedTranscription {
     let settings = get_settings(app);
     let mut final_text = transcription.to_string();
     let mut post_processed_text: Option<String> = None;
     let mut post_process_prompt: Option<String> = None;
 
-    if post_process {
-        if let Some(processed_text) = post_process_transcription(&settings, &final_text).await {
+    if let Some(prompt_id) = prompt_id {
+        if let Some(processed_text) =
+            post_process_transcription(&settings, &final_text, prompt_id).await
+        {
             post_processed_text = Some(processed_text.clone());
             final_text = processed_text;
-
-            if let Some(prompt_id) = &settings.post_process_selected_prompt_id {
-                if let Some(prompt) = settings
-                    .post_process_prompts
-                    .iter()
-                    .find(|prompt| &prompt.id == prompt_id)
-                {
-                    post_process_prompt = Some(prompt.prompt.clone());
-                }
-            }
+            post_process_prompt = prompt_text_for(&settings, prompt_id);
         }
     }
 
@@ -520,7 +518,15 @@ impl ShortcutAction for TranscribeAction {
         // pill instead of an oversized transparent live window.
         let overlay_started = Instant::now();
         match settings.overlay_style {
-            OverlayStyle::Live if model_supports_streaming => utils::show_streaming_overlay(app),
+            OverlayStyle::Live
+                if should_use_streaming_overlay(
+                    OverlayStyle::Live,
+                    model_supports_streaming,
+                    self.style_bar,
+                ) =>
+            {
+                utils::show_streaming_overlay(app)
+            }
             OverlayStyle::Live | OverlayStyle::Minimal => show_recording_overlay(app),
             OverlayStyle::None => {} // show_overlay_state no-ops on None anyway
         }
@@ -596,9 +602,13 @@ impl ShortcutAction for TranscribeAction {
         if recording_error.is_none() {
             // Dynamically register the cancel shortcut in a separate task to avoid deadlock
             shortcut::register_cancel_shortcut(app);
+            if self.style_bar {
+                crate::style_bar::begin(app);
+            }
         } else {
             // Starting failed (for example due to blocked microphone permissions).
             // Revert UI state so we don't stay stuck in the recording overlay.
+            crate::style_bar::end(app);
             tm.cancel_stream();
             utils::hide_recording_overlay(app);
             set_tray_state(app, TrayIconState::Idle);
@@ -644,7 +654,8 @@ impl ShortcutAction for TranscribeAction {
         let style = get_settings(app).overlay_style;
         // Capture this before finalizing the stream so every later working state
         // targets the same overlay that was shown for this transcription.
-        let use_streaming_overlay = should_use_streaming_overlay(style, tm.is_streaming());
+        let use_streaming_overlay =
+            should_use_streaming_overlay(style, tm.is_streaming(), self.style_bar);
         if use_streaming_overlay {
             tm.emit_stream_working(StreamWorkKind::Transcribing);
         } else {
@@ -659,6 +670,7 @@ impl ShortcutAction for TranscribeAction {
 
         let binding_id = binding_id.to_string(); // Clone binding_id for the async task
         let post_process = self.post_process;
+        let style_bar = self.style_bar;
         let cancel_generation = rm.cancel_generation();
 
         tauri::async_runtime::spawn(async move {
@@ -755,6 +767,19 @@ impl ShortcutAction for TranscribeAction {
                                 utils::redact_text(&transcription)
                             );
 
+                            // The style bar's choice wins; without a session
+                            // the binding decides as before.
+                            let prompt_id: Option<String> =
+                                match style_bar.then(|| crate::style_bar::lock(&ah)).flatten() {
+                                    Some(crate::style_bar::StyleChoice::Prompt(id)) => Some(id),
+                                    Some(crate::style_bar::StyleChoice::Raw) => None,
+                                    None if post_process => {
+                                        get_settings(&ah).post_process_selected_prompt_id
+                                    }
+                                    None => None,
+                                };
+                            let post_process = prompt_id.is_some();
+
                             if post_process {
                                 if use_streaming_overlay {
                                     tm.emit_stream_working(StreamWorkKind::Polishing);
@@ -763,7 +788,11 @@ impl ShortcutAction for TranscribeAction {
                                 }
                             }
                             let Some(processed) = complete_unless_cancelled(
-                                process_transcription_output(&ah, &transcription, post_process),
+                                process_transcription_output(
+                                    &ah,
+                                    &transcription,
+                                    prompt_id.as_deref(),
+                                ),
                                 || rm.was_cancelled_since(cancel_generation),
                             )
                             .await
@@ -968,11 +997,15 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
         "transcribe".to_string(),
         Arc::new(TranscribeAction {
             post_process: false,
+            style_bar: true,
         }) as Arc<dyn ShortcutAction>,
     );
     map.insert(
         "transcribe_with_post_process".to_string(),
-        Arc::new(TranscribeAction { post_process: true }) as Arc<dyn ShortcutAction>,
+        Arc::new(TranscribeAction {
+            post_process: true,
+            style_bar: false,
+        }) as Arc<dyn ShortcutAction>,
     );
     map.insert(
         "cancel".to_string(),
@@ -988,15 +1021,45 @@ pub static ACTION_MAP: Lazy<HashMap<String, Arc<dyn ShortcutAction>>> = Lazy::ne
 #[cfg(test)]
 mod tests {
     use super::{
-        complete_unless_cancelled, is_blank_transcription, should_use_streaming_overlay,
-        strip_think_block,
+        complete_unless_cancelled, is_blank_transcription, prompt_text_for,
+        should_use_streaming_overlay, strip_think_block,
     };
-    use crate::settings::OverlayStyle;
+    use crate::settings::{get_default_settings, LLMPrompt, OverlayStyle};
     use std::future;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
+
+    fn settings_with_two_prompts() -> crate::settings::AppSettings {
+        let mut s = get_default_settings();
+        s.post_process_prompts = vec![
+            LLMPrompt {
+                id: "a".into(),
+                name: "Standard".into(),
+                prompt: "A ${output}".into(),
+            },
+            LLMPrompt {
+                id: "b".into(),
+                name: "E-Mail".into(),
+                prompt: "B ${output}".into(),
+            },
+        ];
+        s.post_process_selected_prompt_id = Some("a".into());
+        s
+    }
+
+    #[test]
+    fn post_process_uses_the_given_prompt_not_the_selected_one() {
+        let s = settings_with_two_prompts();
+        assert_eq!(prompt_text_for(&s, "b").as_deref(), Some("B ${output}"));
+    }
+
+    #[test]
+    fn post_process_with_unknown_prompt_returns_none() {
+        let s = settings_with_two_prompts();
+        assert_eq!(prompt_text_for(&s, "gibt-es-nicht"), None);
+    }
 
     #[test]
     fn blank_transcription_is_detected() {
@@ -1067,9 +1130,36 @@ mod tests {
 
     #[test]
     fn live_overlay_uses_streaming_states_only_for_streaming_models() {
-        assert!(should_use_streaming_overlay(OverlayStyle::Live, true));
-        assert!(!should_use_streaming_overlay(OverlayStyle::Live, false));
-        assert!(!should_use_streaming_overlay(OverlayStyle::Minimal, true));
-        assert!(!should_use_streaming_overlay(OverlayStyle::None, true));
+        assert!(should_use_streaming_overlay(
+            OverlayStyle::Live,
+            true,
+            false
+        ));
+        assert!(!should_use_streaming_overlay(
+            OverlayStyle::Live,
+            false,
+            false
+        ));
+        assert!(!should_use_streaming_overlay(
+            OverlayStyle::Minimal,
+            true,
+            false
+        ));
+        assert!(!should_use_streaming_overlay(
+            OverlayStyle::None,
+            true,
+            false
+        ));
+    }
+
+    #[test]
+    fn style_bar_session_uses_compact_overlay() {
+        // The style bar lives above the compact pill, so a style-bar dictation
+        // never switches to the Live panel.
+        assert!(!should_use_streaming_overlay(
+            OverlayStyle::Live,
+            true,
+            true
+        ));
     }
 }

@@ -1,33 +1,41 @@
 @import "../styles/theme.css";
 
+@font-face {
+  font-family: "Lato";
+  font-weight: 400;
+  src: url("./fonts/Lato-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Lato";
+  font-weight: 800;
+  src: url("./fonts/Lato-Heavy.ttf") format("truetype");
+}
+
 :root {
-  --s-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  /* Near-opaque app surface (theme.css --color-background at 98%). Auto-flips
-     light/dark with --color-background, so no dark-mode override is needed. */
-  --s-surface: color-mix(in srgb, var(--color-background) 98%, transparent);
-  /* Accent = logo pink; flips automatically via --color-logo-primary. */
-  --s-accent: var(--color-logo-primary);
-  /* The rest come from theme.css, which already follows the theme setting. */
-  --s-accent-soft: color-mix(
-    in srgb,
-    var(--color-logo-primary) 20%,
-    transparent
-  );
-  --s-muted: var(--color-ink-2);
-  --s-faint: var(--color-ink-3);
-  --s-border: var(--color-line);
-  --s-hair: var(--color-wash);
+  /* handy-diktier-app: fixed 3-t-s CI palette (black + turquoise, yellow only for
+     the recording dot), independent of the light/dark theme. */
+  --s-font: "Lato", "Segoe UI", sans-serif;
+  --s-surface: rgba(0, 0, 0, 0.92);
+  --s-accent: #35d6dd;
+  --s-accent-soft: rgba(53, 214, 221, 0.25);
+  --s-rec: #ffff00;
+  --s-rec-soft: rgba(255, 255, 0, 0.3);
+  --s-text: #ffffff;
+  --s-muted: #ced3dc;
+  --s-faint: #ced3dc;
+  --s-border: rgba(206, 211, 220, 0.25);
+  --s-hair: #2b2b2b;
+  --ov-bar-gap: 6px; /* space between style bar and pill */
 
   /* Card geometry — single source of truth for the visible overlay sizes. The
      native overlay window (overlay.rs) is sized from these: it must be at least
      the card's max footprint (--ov-work-w for compact, --ov-open-w for Live),
      since the card is anchored flush to the screen edge in CSS. Keep overlay.rs
      in sync when these change. */
-  --ov-rest-w: 172px; /* resting compact pill (minimal, recording) -- roomy enough
-                         for the English working label before the grow starts */
+  --ov-rest-w: 300px; /* compact pill = style bar width, recording and working */
   --ov-pill-w: 184px; /* base width / Live pill before it opens or collapses */
-  --ov-work-w: 216px; /* working pill (transcribing / polishing) -- wide enough to
-                         center longer labels; shared by Live (collapsed) + minimal */
+  --ov-work-w: 300px; /* working pill (transcribing / polishing) -- same width as
+                         the style bar above it */
   --ov-open-w: 392px; /* Live panel, expanded */
   --ov-base-h: 40px; /* control-row height (.sbase) */
   --ov-cap-max-h: 64px; /* max height of the scrolling live-text region */
@@ -51,6 +59,57 @@
 }
 .ov-stage.top {
   align-items: flex-start; /* top placement: flush to the top edge */
+}
+
+/* Style bar stacked above the compact pill (below it when placed at the top). */
+.ov-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ov-bar-gap);
+}
+.ov-stage.top .ov-col {
+  flex-direction: column-reverse;
+}
+.sbar {
+  width: var(--ov-rest-w);
+  max-width: calc(100vw - 2px);
+  display: flex;
+  gap: 5px;
+}
+.schip {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 0;
+  border-radius: 12px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--s-muted);
+  background: var(--s-surface);
+  border: 1px solid var(--s-border);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+.schip kbd {
+  font: inherit;
+  opacity: 0.7;
+  margin-right: 3px;
+}
+.schip.on {
+  background: var(--s-accent);
+  border-color: var(--s-accent);
+  color: #000000;
+  font-weight: 800;
+  transform: translateY(-2px);
+}
+.sbar.locked .schip:not(.on) {
+  opacity: 0.45;
 }
 
 /* Compact pill: fade the whole container in/out (the pill itself never pops or
@@ -157,6 +216,17 @@
 .scard.compact.cworking {
   width: var(--ov-work-w);
 }
+/* Compact pill: dot | waveform across the full width | timer + cancel. */
+.scard.compact .sbase {
+  grid-template-columns: auto 1fr auto;
+}
+.scard.compact .swave {
+  justify-content: space-between;
+  padding: 0 12px;
+}
+.scard.compact .stimer {
+  opacity: 1;
+}
 
 /* text region — auto-height open via grid-rows trick; region fades as a whole */
 .stext {
@@ -191,7 +261,7 @@
   font-style: italic;
   line-height: 1.35;
   letter-spacing: -0.003em;
-  color: var(--color-text);
+  color: var(--s-text);
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px);
   mask-image: linear-gradient(to bottom, transparent 0, #000 18px);
   scrollbar-width: none; /* Firefox */
@@ -264,7 +334,7 @@
     opacity 180ms ease;
 }
 .sdot.ready {
-  background: var(--s-accent);
+  background: var(--s-rec);
   opacity: 1;
   animation: sdot-pulse 1.9s infinite;
 }
@@ -276,7 +346,7 @@
 }
 @keyframes sdot-pulse {
   0% {
-    box-shadow: 0 0 0 0 var(--s-accent-soft);
+    box-shadow: 0 0 0 0 var(--s-rec-soft);
   }
   70% {
     box-shadow: 0 0 0 7px transparent;
@@ -375,7 +445,7 @@
 }
 .sx:hover {
   background: var(--s-accent-soft);
-  color: var(--color-text);
+  color: var(--s-text);
   transform: scale(1.05);
 }
 .sx:active {
@@ -399,7 +469,7 @@
 }
 .swork-label {
   font-size: 12px;
-  color: var(--s-muted);
+  color: var(--s-text);
   white-space: nowrap;
   padding: 0 8px; /* breathing room from the spinner / cancel when content-sized */
   /* Safety net: ellipsize rather than clip if a label exceeds the max pill width. */

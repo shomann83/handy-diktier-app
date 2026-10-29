@@ -307,10 +307,13 @@ impl TranscriptionJobManager {
             return Ok(());
         }
 
+        let selected_prompt_id = crate::settings::get_settings(&self.app)
+            .post_process_selected_prompt_id
+            .filter(|_| entry.post_process_requested);
         let processed = tauri::async_runtime::block_on(process_transcription_output(
             &self.app,
             &text,
-            entry.post_process_requested,
+            selected_prompt_id.as_deref(),
         ));
         // Post-processing can take a while; a cancel during it still wins.
         if cancelled.load(Ordering::Acquire) {
