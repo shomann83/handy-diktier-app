@@ -177,8 +177,9 @@ where
     }
 }
 
-fn should_use_streaming_overlay(style: OverlayStyle, is_streaming: bool) -> bool {
-    style == OverlayStyle::Live && is_streaming
+fn should_use_streaming_overlay(style: OverlayStyle, is_streaming: bool, style_bar: bool) -> bool {
+    // The style bar sits above the compact pill, so it always uses that form.
+    style == OverlayStyle::Live && is_streaming && !style_bar
 }
 
 /// Template text of the post-processing prompt with this id.
@@ -517,7 +518,15 @@ impl ShortcutAction for TranscribeAction {
         // pill instead of an oversized transparent live window.
         let overlay_started = Instant::now();
         match settings.overlay_style {
-            OverlayStyle::Live if model_supports_streaming => utils::show_streaming_overlay(app),
+            OverlayStyle::Live
+                if should_use_streaming_overlay(
+                    OverlayStyle::Live,
+                    model_supports_streaming,
+                    self.style_bar,
+                ) =>
+            {
+                utils::show_streaming_overlay(app)
+            }
             OverlayStyle::Live | OverlayStyle::Minimal => show_recording_overlay(app),
             OverlayStyle::None => {} // show_overlay_state no-ops on None anyway
         }
@@ -645,7 +654,8 @@ impl ShortcutAction for TranscribeAction {
         let style = get_settings(app).overlay_style;
         // Capture this before finalizing the stream so every later working state
         // targets the same overlay that was shown for this transcription.
-        let use_streaming_overlay = should_use_streaming_overlay(style, tm.is_streaming());
+        let use_streaming_overlay =
+            should_use_streaming_overlay(style, tm.is_streaming(), self.style_bar);
         if use_streaming_overlay {
             tm.emit_stream_working(StreamWorkKind::Transcribing);
         } else {
@@ -1120,9 +1130,36 @@ mod tests {
 
     #[test]
     fn live_overlay_uses_streaming_states_only_for_streaming_models() {
-        assert!(should_use_streaming_overlay(OverlayStyle::Live, true));
-        assert!(!should_use_streaming_overlay(OverlayStyle::Live, false));
-        assert!(!should_use_streaming_overlay(OverlayStyle::Minimal, true));
-        assert!(!should_use_streaming_overlay(OverlayStyle::None, true));
+        assert!(should_use_streaming_overlay(
+            OverlayStyle::Live,
+            true,
+            false
+        ));
+        assert!(!should_use_streaming_overlay(
+            OverlayStyle::Live,
+            false,
+            false
+        ));
+        assert!(!should_use_streaming_overlay(
+            OverlayStyle::Minimal,
+            true,
+            false
+        ));
+        assert!(!should_use_streaming_overlay(
+            OverlayStyle::None,
+            true,
+            false
+        ));
+    }
+
+    #[test]
+    fn style_bar_session_uses_compact_overlay() {
+        // The style bar lives above the compact pill, so a style-bar dictation
+        // never switches to the Live panel.
+        assert!(!should_use_streaming_overlay(
+            OverlayStyle::Live,
+            true,
+            true
+        ));
     }
 }

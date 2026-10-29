@@ -12,7 +12,7 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use tauri::AppHandle;
 use tauri_specta::Event;
 
-use crate::settings::{get_settings, LLMPrompt};
+use crate::settings::{get_settings, AppSettings, LLMPrompt};
 
 /// Label of the raw slot; the overlay replaces it with its localized text.
 const RAW_LABEL: &str = "Roh";
@@ -143,10 +143,15 @@ impl SessionCell {
         self.session.as_ref().map(StyleSession::event)
     }
 
-    pub fn end(&mut self) -> StyleBarEvent {
-        self.session = None;
+    /// Closes the session and releases the digits. Returns the hidden-bar event
+    /// only for a session that was still switchable; after the lock the bar
+    /// keeps showing the style until the overlay itself hides.
+    pub fn end(&mut self) -> Option<StyleBarEvent> {
+        let session = self.session.take();
         self.capture.stop();
-        StyleBarEvent::hidden()
+        session
+            .filter(|s| !s.locked)
+            .map(|_| StyleBarEvent::hidden())
     }
 }
 
@@ -187,10 +192,21 @@ fn emit(app: &AppHandle, event: StyleBarEvent) {
     }
 }
 
+/// Prompts offered in the bar. With post-processing switched off only raw is
+/// offered, so nothing is sent to the LLM provider.
+fn session_prompts(settings: &AppSettings) -> &[LLMPrompt] {
+    if settings.post_process_enabled {
+        &settings.post_process_prompts
+    } else {
+        &[]
+    }
+}
+
 /// Open a session for the dictation that is starting.
 pub fn begin(app: &AppHandle) {
     let _ = APP.set(app.clone());
-    let session = StyleSession::new(&get_settings(app).post_process_prompts, RAW_LABEL);
+    let settings = get_settings(app);
+    let session = StyleSession::new(session_prompts(&settings), RAW_LABEL);
     let event = cell().begin(session);
     emit(app, event);
 }
@@ -215,11 +231,10 @@ pub fn lock(app: &AppHandle) -> Option<StyleChoice> {
     choice
 }
 
-/// Close the session and hide the bar. Safe to call repeatedly.
+/// Close the session and release the digits. Safe to call repeatedly.
 pub fn end(app: &AppHandle) {
-    let had_session = cell().current_event().is_some();
     let event = cell().end();
-    if had_session {
+    if let Some(event) = event {
         emit(app, event);
     }
 }
@@ -278,7 +293,10 @@ mod tests {
     #[test]
     fn starts_on_first_prompt() {
         let s = three();
-        assert_eq!(s.event().labels, vec!["Roh", "Standard", "E-Mail", "WhatsApp"]);
+        assert_eq!(
+            s.event().labels,
+            vec!["Roh", "Standard", "E-Mail", "WhatsApp"]
+        );
         assert_eq!(s.event().active, 1);
         assert!(!s.event().locked);
         assert!(s.event().visible);
@@ -356,9 +374,37 @@ mod tests {
         let (mut cell, cap) = cell_with_fake();
         cell.begin(three());
         cell.select(2);
-        let hidden = cell.end();
+        let hidden = cell.end().expect("unlocked session hides the bar");
         assert!(!hidden.visible);
         assert_eq!(cell.lock(), None);
         assert!(cap.stops() >= 1);
+    }
+
+    #[test]
+    fn end_after_lock_leaves_hiding_to_the_overlay() {
+        // After the lock the bar must stay (with the style name) until the
+        // overlay itself hides, so `end` sends nothing.
+        let (mut cell, cap) = cell_with_fake();
+        cell.begin(three());
+        cell.lock();
+        assert!(cell.end().is_none());
+        assert_eq!(cell.lock(), None);
+        assert!(cap.stops() >= 1);
+    }
+
+    #[test]
+    fn end_without_session_sends_nothing() {
+        let (mut cell, _cap) = cell_with_fake();
+        assert!(cell.end().is_none());
+    }
+
+    #[test]
+    fn disabled_post_processing_offers_only_raw() {
+        let mut s = crate::settings::get_default_settings();
+        s.post_process_prompts = vec![p("a", "Standard"), p("b", "E-Mail")];
+        s.post_process_enabled = true;
+        assert_eq!(session_prompts(&s).len(), 2);
+        s.post_process_enabled = false;
+        assert!(session_prompts(&s).is_empty());
     }
 }
