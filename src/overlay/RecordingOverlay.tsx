@@ -12,12 +12,15 @@ import type {
 import i18n, { syncLanguageFromSettings } from "@/i18n";
 import type { ModelStateEvent } from "@/lib/types/events";
 import { getLanguageDirection } from "@/lib/utils/rtl";
+import StyleBar from "./StyleBar";
+import { HIDDEN, type StyleBarState, processingLabel } from "./styleBarState";
 
 type OverlayState = "recording" | "streaming" | "transcribing" | "processing";
 
 // Number of reactive bars in the waveform (the simple, smoothed style shared by
-// every overlay form). Mic levels arrive as 16 FFT buckets; we take the first N.
-const WAVE_BARS = 9;
+// every overlay form). Mic levels arrive as 16 FFT buckets; all 16 are used so
+// the waveform can span the full width of the compact pill.
+const WAVE_BARS = 16;
 
 // Only call out a model load in the Live preview once it has run this long.
 // Warm loads finish in well under this (~0.2s on Apple Silicon, ~1.5s on a
@@ -28,6 +31,7 @@ const SLOW_MODEL_LOAD_MS = 2000;
 const RecordingOverlay: React.FC = () => {
   const { t } = useTranslation();
   const [isVisible, setIsVisible] = useState(false);
+  const [styleBar, setStyleBar] = useState<StyleBarState>(HIDDEN);
   const [state, setState] = useState<OverlayState>("recording");
   // `Stream::play()` returning does not mean hardware callbacks are flowing.
   // Stay visually in an arming state until the backend processes the first
@@ -111,7 +115,13 @@ const RecordingOverlay: React.FC = () => {
       const unlistenHide = await listen("hide-overlay", () => {
         setIsVisible(false);
         setCaptureReady(false);
+        setStyleBar(HIDDEN);
       });
+
+      const unlistenStyleBar = await listen<StyleBarState>(
+        "style-bar-event",
+        (event) => setStyleBar(event.payload),
+      );
 
       const unlistenReady = await listen("recording-ready", () => {
         setElapsed(0);
@@ -170,6 +180,7 @@ const RecordingOverlay: React.FC = () => {
       return () => {
         unlistenShow();
         unlistenHide();
+        unlistenStyleBar();
         unlistenReady();
         unlistenLevel();
         unlistenStream();
@@ -183,8 +194,10 @@ const RecordingOverlay: React.FC = () => {
   }, []);
 
   // Elapsed capture timer starts only once microphone samples are flowing.
+  // The compact pill shows it too, so it runs while recording as well.
   useEffect(() => {
-    if (state !== "streaming" || !isVisible || !captureReady) return;
+    if (state !== "streaming" && state !== "recording") return;
+    if (!isVisible || !captureReady) return;
     const id = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => clearInterval(id);
   }, [state, isVisible, captureReady]);
@@ -350,17 +363,26 @@ const RecordingOverlay: React.FC = () => {
   // width between them; the cancel button is in both rows so it stays put.
   const working = state === "transcribing" || state === "processing";
   const workLabel =
-    state === "processing" ? t("overlay.processing") : transcribingLabel;
+    state === "processing"
+      ? processingLabel(styleBar, t("overlay.processing"), (style) =>
+          t("overlay.processingWithStyle", { style }),
+        )
+      : transcribingLabel;
 
   return (
     <div
       dir={direction}
       className={`ov-stage ${position} ov-fade ${isVisible ? "show" : ""}`}
     >
-      <div
-        className={`scard compact ${working && isVisible ? "cworking" : ""}`}
-      >
-        {working ? workingRow(workLabel, true) : listeningRow(false, true)}
+      <div className="ov-col">
+        {styleBar.visible && (
+          <StyleBar state={styleBar} rawLabel={t("overlay.styleRaw")} />
+        )}
+        <div
+          className={`scard compact ${working && isVisible ? "cworking" : ""}`}
+        >
+          {working ? workingRow(workLabel, true) : listeningRow(true, true)}
+        </div>
       </div>
     </div>
   );
