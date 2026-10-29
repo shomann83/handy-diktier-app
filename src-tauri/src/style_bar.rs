@@ -192,13 +192,20 @@ fn emit(app: &AppHandle, event: StyleBarEvent) {
     }
 }
 
-/// Prompts offered in the bar. With post-processing switched off only raw is
-/// offered, so nothing is sent to the LLM provider.
-fn session_prompts(settings: &AppSettings) -> &[LLMPrompt] {
-    if settings.post_process_enabled {
-        &settings.post_process_prompts
+/// A session (bar + digit capture) only makes sense when there is a style to
+/// pick besides raw. With post-processing off there is none: the dictation
+/// stays raw, nothing is captured and nothing goes to the LLM provider.
+fn should_open_session(settings: &AppSettings) -> bool {
+    settings.post_process_enabled && !settings.post_process_prompts.is_empty()
+}
+
+/// Re-checked at the lock: post-processing may have been switched off while
+/// recording, and then nothing may be sent.
+fn effective_choice(choice: StyleChoice, post_process_enabled: bool) -> StyleChoice {
+    if post_process_enabled {
+        choice
     } else {
-        &[]
+        StyleChoice::Raw
     }
 }
 
@@ -206,7 +213,10 @@ fn session_prompts(settings: &AppSettings) -> &[LLMPrompt] {
 pub fn begin(app: &AppHandle) {
     let _ = APP.set(app.clone());
     let settings = get_settings(app);
-    let session = StyleSession::new(session_prompts(&settings), RAW_LABEL);
+    if !should_open_session(&settings) {
+        return;
+    }
+    let session = StyleSession::new(&settings.post_process_prompts, RAW_LABEL);
     let event = cell().begin(session);
     emit(app, event);
 }
@@ -228,7 +238,8 @@ pub fn lock(app: &AppHandle) -> Option<StyleChoice> {
     if let Some(event) = event {
         emit(app, event);
     }
-    choice
+    let enabled = get_settings(app).post_process_enabled;
+    choice.map(|choice| effective_choice(choice, enabled))
 }
 
 /// Close the session and release the digits. Safe to call repeatedly.
@@ -399,12 +410,23 @@ mod tests {
     }
 
     #[test]
-    fn disabled_post_processing_offers_only_raw() {
+    fn session_opens_only_with_post_processing_and_prompts() {
         let mut s = crate::settings::get_default_settings();
         s.post_process_prompts = vec![p("a", "Standard"), p("b", "E-Mail")];
         s.post_process_enabled = true;
-        assert_eq!(session_prompts(&s).len(), 2);
+        assert!(should_open_session(&s));
         s.post_process_enabled = false;
-        assert!(session_prompts(&s).is_empty());
+        assert!(!should_open_session(&s));
+        s.post_process_enabled = true;
+        s.post_process_prompts.clear();
+        assert!(!should_open_session(&s));
+    }
+
+    #[test]
+    fn prompt_choice_becomes_raw_when_post_processing_was_switched_off() {
+        let choice = StyleChoice::Prompt("a".into());
+        assert_eq!(effective_choice(choice.clone(), true), choice);
+        assert_eq!(effective_choice(choice, false), StyleChoice::Raw);
+        assert_eq!(effective_choice(StyleChoice::Raw, true), StyleChoice::Raw);
     }
 }

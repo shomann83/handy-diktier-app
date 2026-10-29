@@ -10,7 +10,7 @@ Ziel ist, den Stil **während des Diktats** zu sehen und mit einer Zifferntaste 
 
 ## Was gebaut wird (von Sebastian entschieden)
 
-1. **Ein Kürzel für alles:** Handys Kürzel `transcribe` (aktuell `Alt+Leertaste`) startet die Aufnahme **immer mit Stil-Leiste und KI-Aufbereitung**. Das zweite Kürzel (`transcribe_with_post_process`) wird nicht mehr gebraucht. **Die Tastenkombination bleibt in Handys Einstellungen frei wählbar** (Nachtrag 28.10.2026, nichts hart einbauen). Einschränkung: Kombinationen mit einer Ziffer sind nicht sinnvoll, weil 0–9 während des Diktats für die Stil-Wahl reserviert sind.
+1. **Ein Kürzel für alles:** Handys Kürzel `transcribe` (aktuell `Alt+Leertaste`) startet die Aufnahme **immer mit Stil-Leiste und KI-Aufbereitung**. Das zweite Kürzel (`transcribe_with_post_process`) wird nicht mehr gebraucht. **Die Tastenkombination bleibt in Handys Einstellungen frei wählbar** (Nachtrag 28.10.2026, nichts hart einbauen). Einschränkung: Während des Diktats sind 0–9 (ohne Modifier oder mit Alt/Win) für die Stil-Wahl reserviert. Strg+Ziffer und Shift+Ziffer gehen durch (Nachtrag 29.10.2026 nach Codex-Prüfung), Kürzel wie `Strg+1` funktionieren also.
 2. **Stil-Leiste über der Aufnahme-Pille:** `0 Roh · 1 Standard · 2 E-Mail · 3 WhatsApp`. Gleich breite Felder, Aussehen nach Entwurf „Variante A“ aus der Abstimmung (siehe Skizze unten).
    **Farben nach 3-t-s-CI, Variante „Schwarz + Türkis“** (statt Handy-Pink; Quelle `AI\Context\corporate-identity-3ts.md`):
    - Flächen von Leiste und Pille: Schwarz `#000000`, leicht deckend.
