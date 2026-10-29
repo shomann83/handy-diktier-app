@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Cog, FlaskConical, History, Info, Sparkles, Cpu } from "lucide-react";
-import HandyTextLogo from "./icons/HandyTextLogo";
+import TypeTalkTextLogo from "./icons/TypeTalkTextLogo";
 import HandyHand from "./icons/HandyHand";
 import { useSettings } from "../hooks/useSettings";
 import {
@@ -94,7 +94,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className="flex flex-col w-40 h-full border-e border-line items-center px-2">
-      <HandyTextLogo width={120} className="m-4" />
+      <TypeTalkTextLogo className="m-4" />
       <div className="flex flex-col w-full items-center gap-1 pt-2 border-t border-line">
         {availableSections.map((section) => {
           const Icon = section.icon;
